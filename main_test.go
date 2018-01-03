@@ -204,8 +204,8 @@ func TestBadExec(t *testing.T) {
 
 	if e, ok := err.(*exec.ExitError); ok {
 		if status, ok := e.Sys().(syscall.WaitStatus); ok {
-			if status.ExitStatus() != 2 {
-				log.Fatal("Expect 2 exit code got ", status.ExitStatus())
+			if status.ExitStatus() != 125 {
+				log.Fatal("Expect 125 exit code got ", status.ExitStatus())
 			}
 		}
 	} else {
