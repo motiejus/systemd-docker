@@ -370,9 +370,9 @@ func TestNamedContainerNoRm(t *testing.T) {
 		t.Fatal("Should be the same container", container.ID, container2.ID)
 	}
 
-        if !container2.HostConfig.Privileged {
-                t.Fatal("Container2 is not privileged")
-        }
+	if !container2.HostConfig.Privileged {
+		t.Fatal("Container2 is not privileged")
+	}
 
 	deleteTestContainer(t)
 }
