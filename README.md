@@ -28,7 +28,7 @@ After=docker.service
 Requires=docker.service
 
 [Service]
-ExecStart=/opt/bin/systemd-docker run --rm --name %n nginx
+ExecStart=/opt/bin/systemd-docker run --cgroup-parent=/system.slice/%n --rm --name %n nginx
 Restart=always
 RestartSec=10s
 Type=notify
@@ -76,12 +76,7 @@ The contents of `/etc/environment` will be added to your docker run command
 Cgroups
 -------
 
-The main magic of how this works is that the container processes are moved from the Docker cgroups to the system unit cgroups.  By default all application cgroups will be moved.  This means by default you can't use `--cpuset` or `-m` in Docker.  If you don't want to use the systemd cgroups, but instead use the Docker cgroups, you can control which cgroups are transfered using the `--cgroups` option.  **Minimally you must set `name=systemd`; otherwise, systemd will lose track of the container**.  For example
-
-
-`ExecStart=/opt/bin/systemd-docker --cgroups name=systemd --cgroups=cpu run --rm --name %n nginx`
-
-The above command will use the `name=systemd` and `cpu` cgroups of systemd but then use Docker's cgroups for all the others, like the freezer cgroup.
+Processes inside the container should belong to the cgroup of the systemd unit. This is achieved by passing `--cgroup-parent=/system.slice/%n` to the `docker run` command.
 
 Pid File
 --------
@@ -122,7 +117,7 @@ Requires=docker.service
 
 [Service]
 ExecStartPre=/usr/bin/docker run --rm -v /opt/bin:/opt/bin ibuildthecloud/systemd-docker
-ExecStart=/opt/bin/systemd-docker run --rm --name %n nginx
+ExecStart=/opt/bin/systemd-docker run --cgroup-parent=/system.slice/%n --rm --name %n nginx
 Restart=always
 RestartSec=10s
 Type=notify
@@ -133,17 +128,6 @@ TimeoutStopSec=15
 [Install]
 WantedBy=multi-user.target
 ```
-
-Known issues
-============
-
-### Inconsistent cgroup
-CentOS 7 is inconsistent in the way it handles some cgroups. 
-It has `3:cpuacct,cpu:/user.slice` in `/proc/[pid]/cgroups` which is inconsistent with the cgroup path `/sys/fs/cgroup/cpu,cpuacct/` that systemd-docker is trying to move pids to.
-
-This will cause `systemd-docker` to fail unless run with`systemd-docker --cgroups name=systemd run`
-
-See https://github.com/ibuildthecloud/systemd-docker/issues/15 for details.
 
 License
 -------

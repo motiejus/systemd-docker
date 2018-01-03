@@ -5,7 +5,6 @@ import (
 	"log"
 	"os"
 	"os/exec"
-	"path"
 	"strconv"
 	"syscall"
 	"testing"
@@ -21,33 +20,6 @@ func TestParseNoRun(t *testing.T) {
 	_, err := parseContext([]string{"a", "b", "-d"})
 	if err == nil {
 		t.Fatal("parse succeeded")
-	}
-}
-
-func TestParseCgroupsAll(t *testing.T) {
-	c, err := parseContext([]string{"--cgroups", "all", "run"})
-	if err != nil {
-		t.Fatal("parse failed", err)
-	}
-
-	if !c.AllCgroups {
-		t.Fatal("all cgroups should be true")
-	}
-}
-
-func TestParseCgroupList(t *testing.T) {
-	c, err := parseContext([]string{"--cgroups", "a", "--cgroups", "b", "run"})
-	if err != nil {
-		t.Fatal("parse failed", err)
-	}
-
-	if c.AllCgroups {
-		t.Fatal("all cgroups should be false")
-	}
-
-	if c.Cgroups[0] != "a" ||
-		c.Cgroups[1] != "b" {
-		t.Fatal("Invalid cgroups value", c.Cgroups)
 	}
 }
 
@@ -231,48 +203,6 @@ func TestGoodExec(t *testing.T) {
 
 	if c.Pid <= 0 {
 		t.Fatal("Bad container pid", c.Pid)
-	}
-}
-
-func TestParseCgroups(t *testing.T) {
-	cgroups, err := getCgroupsForPid(os.Getpid())
-	if err != nil {
-		log.Fatal("Error:", err)
-	}
-
-	if val, ok := cgroups["blkio"]; ok {
-		p := path.Join(SYSFS, "blkio", val)
-		if _, err := os.Stat(p); os.IsNotExist(err) {
-			log.Fatalf("Path does not exist %s", p, err)
-		}
-	} else {
-		log.Fatal("Failed to find blkio cgroup", val)
-	}
-}
-
-func TestMoveCgroup(t *testing.T) {
-	c := &Context{
-		Args: []string{"-d", "busybox", "echo", "hi"},
-	}
-
-	err := runContainer(c)
-
-	if err != nil {
-		t.Fatal("Exec should not have failed", err)
-		return
-	}
-
-	if c.Cmd.ProcessState.Pid() <= 0 {
-		t.Fatal("Bad pid", c.Cmd.ProcessState.Pid())
-	}
-
-	if c.Pid <= 0 {
-		t.Fatal("Bad container pid", c.Pid)
-	}
-
-	moved, err := moveCgroups(c)
-	if !moved || err != nil {
-		t.Fatal("Failed to move namespaces ", moved, err)
 	}
 }
 

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"errors"
 	"fmt"
 	"io"
@@ -10,28 +9,21 @@ import (
 	"net"
 	"os"
 	"os/exec"
-	"path"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/docker/docker/opts"
 	flag "github.com/docker/docker/pkg/mflag"
 
 	dockerClient "github.com/fsouza/go-dockerclient"
 )
 
 var (
-	SYSFS       string        = "/sys/fs/cgroup"
-	PROCS       string        = "cgroup.procs"
-	CGROUP_PROC string        = "/proc/%d/cgroup"
-	INTERVAL    time.Duration = 1000
+	INTERVAL time.Duration = 1000
 )
 
 type Context struct {
 	Args         []string
-	Cgroups      []string
-	AllCgroups   bool
 	Logs         bool
 	Notify       bool
 	Name         string
@@ -69,19 +61,15 @@ func setupEnvironment(c *Context) {
 
 func parseContext(args []string) (*Context, error) {
 	c := &Context{
-		Logs:       true,
-		AllCgroups: false,
+		Logs: true,
 	}
 
 	flags := flag.NewFlagSet("systemd-docker", flag.ContinueOnError)
-
-	flCgroups := opts.NewListOpts(nil)
 
 	flags.StringVar(&c.PidFile, []string{"p", "-pid-file"}, "", "pipe file")
 	flags.BoolVar(&c.Logs, []string{"l", "-logs"}, true, "pipe logs")
 	flags.BoolVar(&c.Notify, []string{"n", "-notify"}, false, "setup systemd notify for container")
 	flags.BoolVar(&c.Env, []string{"e", "-env"}, false, "inherit environment variable")
-	flags.Var(&flCgroups, []string{"c", "-cgroups"}, "cgroups to take ownership of or 'all' for all cgroups available")
 
 	err := flags.Parse(args)
 	if err != nil {
@@ -130,16 +118,6 @@ func parseContext(args []string) (*Context, error) {
 	c.Name = name
 	c.NotifySocket = os.Getenv("NOTIFY_SOCKET")
 	c.Args = newArgs
-	c.Cgroups = flCgroups.GetAll()
-
-	for _, val := range c.Cgroups {
-		if val == "all" {
-			c.Cgroups = nil
-			c.AllCgroups = true
-			break
-		}
-	}
-
 	setupEnvironment(c)
 
 	return c, nil
@@ -287,126 +265,6 @@ func getContainerPid(c *Context) (int, error) {
 	return container.State.Pid, nil
 }
 
-func getCgroupsForPid(pid int) (map[string]string, error) {
-	file, err := os.Open(fmt.Sprintf(CGROUP_PROC, pid))
-	if err != nil {
-		return nil, err
-	}
-
-	ret := map[string]string{}
-
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		line := strings.SplitN(scanner.Text(), ":", 3)
-		if len(line) != 3 {
-			continue
-		}
-
-		ret[line[1]] = line[2]
-	}
-
-	if err := scanner.Err(); err != nil {
-		return nil, err
-	}
-
-	return ret, nil
-}
-
-func constructCgroupPath(cgroupName string, cgroupPath string) string {
-	return path.Join(SYSFS, strings.TrimPrefix(cgroupName, "name="), cgroupPath, PROCS)
-}
-
-func getCgroupPids(cgroupName string, cgroupPath string) ([]string, error) {
-	ret := []string{}
-
-	file, err := os.Open(constructCgroupPath(cgroupName, cgroupPath))
-	if err != nil {
-		return nil, err
-	}
-
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		ret = append(ret, strings.TrimSpace(scanner.Text()))
-	}
-
-	if err = scanner.Err(); err != nil {
-		return nil, err
-	}
-
-	return ret, nil
-}
-
-func writePid(pid string, path string) error {
-	return ioutil.WriteFile(path, []byte(pid), 0644)
-}
-
-func moveCgroups(c *Context) (bool, error) {
-	moved := false
-	currentCgroups, err := getCgroupsForPid(os.Getpid())
-	if err != nil {
-		return false, err
-	}
-
-	containerCgroups, err := getCgroupsForPid(c.Pid)
-	if err != nil {
-		return false, err
-	}
-
-	var ns []string
-
-	if c.AllCgroups || c.Cgroups == nil || len(c.Cgroups) == 0 {
-		ns = make([]string, 0, len(containerCgroups))
-		for value, _ := range containerCgroups {
-			ns = append(ns, value)
-		}
-	} else {
-		ns = c.Cgroups
-	}
-
-	for _, nsName := range ns {
-		currentPath, ok := currentCgroups[nsName]
-		if !ok {
-			continue
-		}
-
-		containerPath, ok := containerCgroups[nsName]
-		if !ok {
-			continue
-		}
-
-		if currentPath == containerPath || containerPath == "/" {
-			continue
-		}
-
-		pids, err := getCgroupPids(nsName, containerPath)
-		if err != nil {
-			return false, err
-		}
-
-		for _, pid := range pids {
-			pidInt, err := strconv.Atoi(pid)
-			if err != nil {
-				continue
-			}
-
-			if pidDied(pidInt) {
-				continue
-			}
-
-			currentFullPath := constructCgroupPath(nsName, currentPath)
-			log.Printf("Moving pid %s to %s\n", pid, currentFullPath)
-			err = writePid(pid, currentFullPath)
-			if err != nil {
-				return false, err
-			}
-
-			moved = true
-		}
-	}
-
-	return moved, nil
-}
-
 func pidDied(pid int) bool {
 	_, err := os.Stat(fmt.Sprintf("/proc/%d", pid))
 	return os.IsNotExist(err)
@@ -531,11 +389,6 @@ func mainWithArgs(args []string) (*Context, error) {
 	}
 
 	err = runContainer(c)
-	if err != nil {
-		return c, err
-	}
-
-	_, err = moveCgroups(c)
 	if err != nil {
 		return c, err
 	}
